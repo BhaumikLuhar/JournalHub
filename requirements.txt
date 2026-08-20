@@ -1,0 +1,7 @@
+﻿pandas
+openpyxl
+psycopg2-binary
+sqlalchemy
+rapidfuzz
+python-dotenv
+pytest
