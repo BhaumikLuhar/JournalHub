@@ -24,3 +24,37 @@ The directory:
 
 ```text
 data/raw/
+
+## Database Schema
+
+The PostgreSQL database schema is implemented through ordered migrations in
+`database/migrations/`.
+
+Day 2 creates the complete database schema with 18 tables covering:
+
+- source and dataset tracking
+- raw file and raw-row lineage
+- ingestion rejections
+- canonical journals
+- journal identifiers and aliases
+- source-to-journal mappings
+- SCImago records, categories, and areas
+- ABDC records
+- ABS records
+- RePEc records
+- FT50 records
+- entity-resolution candidates and decisions
+
+### Raw file SHA-256 uniqueness
+
+`raw_files.sha256` is globally unique across all sources.
+
+This is intentional: if two different source folders contain byte-identical
+files, the system treats them as the same raw artifact. This is a deliberate
+simplicity tradeoff, not an oversight.
+
+The database also stores `raw_rows.raw_data` as a structured raw-row snapshot.
+It is **not** a byte-level lossless copy of the original file. Parsing through
+`pandas.read_csv()` can normalize representations before the row is stored.
+The untouched files under `data/raw/` remain the true byte-level source of
+truth.
