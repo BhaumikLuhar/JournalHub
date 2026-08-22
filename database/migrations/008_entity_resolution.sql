@@ -35,7 +35,7 @@ CREATE TABLE entity_match_decisions (
     source_record_table VARCHAR(50) NOT NULL,
     source_record_id INTEGER NOT NULL,
     journal_id INTEGER REFERENCES journals(id),  -- NULL when decision = 'rejected_no_match'
-    match_method VARCHAR(30) NOT NULL,
+    match_method VARCHAR(100) NOT NULL,
     confidence NUMERIC(5,4),
     -- Explicit taxonomy so "intentionally unmatched" is distinguishable from
     -- "still needs review":

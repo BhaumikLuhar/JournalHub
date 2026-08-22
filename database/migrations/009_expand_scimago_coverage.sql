@@ -1,0 +1,2 @@
+ALTER TABLE scimago_records
+ALTER COLUMN coverage TYPE VARCHAR(500);
