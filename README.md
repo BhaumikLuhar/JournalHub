@@ -4,27 +4,42 @@ JournalHub is a unified journal intelligence platform that consolidates journal 
 
 ## Project Status
 
-**Current phase:** Day 4 complete — SCImago raw + staging ingestion
+**Current phase:** Day 5 complete — SCImago canonical journal seeding and entity resolution
 
-Days 1–4 are complete.
+Days 1–5 are complete.
 
 * **Day 1:** Environment setup and full raw-data inventory completed.
+
 * **Day 2:** Complete PostgreSQL database schema implemented through ordered migrations, covering 18 tables, controlled vocabularies, uniqueness constraints, and foreign-key relationships.
+
 * **Day 3:** Shared normalization utilities, CSV/Excel loaders, validation helpers, transactional dataset-import helpers, canonical-journal resolution, and entity-match candidate helpers completed and tested in isolation.
+
 * **Day 4:** SCImago source-specific ingestion completed from raw CSV files into raw/staging storage, including filename parsing, source-row transformation, validation, transactional ingestion, rejection handling, idempotent retries, and crash-recovery testing.
 
+* **Day 5:** SCImago canonical-journal seeding completed. Every distinct SCImago `sourceid` now resolves to exactly one canonical journal, with source identifiers, source mappings, entity-match decisions, SCImago record links, deterministic representative title/publisher selection, and idempotent reruns verified.
+
 ### Day 3 Verification
+
 The following were verified successfully:
 
 * All shared ingestion and entity-resolution modules import successfully.
+
 * All 14 normalization/manual-test assertions pass.
+
 * Dataset creation, retry, and skip behavior is idempotent and non-destructive.
+
 * Transactional dataset imports correctly commit on success and roll back on failure.
+
 * Canonical-journal creation is sequentially idempotent.
+
 * Conflicting identifiers do not abort new-journal creation and are logged for review.
+
 * Entity-match candidates merge repeated evidence without creating duplicate rows.
+
 * Accepting a candidate correctly closes all pending sibling candidates.
+
 * Scratch test data has been removed from the database.
+
 * No concurrency guarantee is claimed for the sequential entity-resolution implementation.
 
 ### Day 4 Verification
@@ -32,29 +47,96 @@ The following were verified successfully:
 The following were verified successfully:
 
 * 49 SCImago CSV files discovered and processed.
+
 * All 49 SCImago datasets have `status='loaded'`.
+
 * 139,491 SCImago records were loaded into `scimago_records`.
+
 * `raw_rows` contains 139,491 SCImago source-row snapshots.
+
 * Dataset `record_count` matches the actual `scimago_records` count for every dataset.
+
 * `scimago_categories` and `scimago_areas` were populated without orphaned rows.
-* `journal_id` remains NULL for all SCImago records, as required before entity resolution.
+
+* `journal_id` remained NULL for all SCImago records before Day 5 entity resolution, as required.
+
 * A second ingestion run skips all already-loaded datasets without creating duplicates.
+
 * Deliberate transaction failure was tested; failed imports rolled back their raw and normalized rows completely.
+
 * Failed datasets can be retried successfully.
+
 * SCImago `-` quartile values are normalized to NULL.
+
 * SJR values are parsed as decimals and validated against the 0–100 range.
+
 * No SCImago ingestion rejections were present after successful ingestion.
+
 * Common normalization, SCImago parser, transformer, and validator manual tests all pass.
 
-**Next phase:** Day 5 — Entity resolution
+### Day 5 Verification
 
-Day 5 will resolve source-specific journal records to canonical journals and populate the appropriate `journal_id` relationships using the entity-resolution helpers completed on Day 3.
+The following were verified successfully:
+
+* 139,491 SCImago records were available as the input dataset for canonical seeding.
+
+* 17,148 distinct SCImago `sourceid` values were identified.
+
+* 17,148 canonical journal rows exist in `journals`.
+
+* Every distinct SCImago `sourceid` resolves to exactly one canonical journal.
+
+* Every SCImago record has a non-NULL `journal_id`.
+
+* 17,148 `SCIMAGO_SOURCE_ID` identifiers are present in `journal_identifiers`.
+
+* 139,491 SCImago records have corresponding entries in `journal_source_mapping`.
+
+* 139,491 SCImago records have corresponding entries in `entity_match_decisions`.
+
+* All SCImago source mappings use `match_method='source_id'`, `match_score=1.0`, and `match_status='accepted'`.
+
+* All SCImago entity-match decisions use `match_method='source_id'`, `confidence=1.0`, and `decision='accepted'`.
+
+* No SCImago `sourceid` is linked to more than one canonical journal.
+
+* Strong source identifiers take precedence over normalized-title matching during SCImago canonical seeding.
+
+* The canonical helper was corrected so that a supplied strong source identifier does not fall through to ISSN/title matching when that source identifier has not yet been registered.
+
+* 19 Sourceids that were initially collapsed through normalized-title matching were identified and repaired into separate canonical journals.
+
+* The repaired 19 Sourceids now each have their own canonical journal and `SCIMAGO_SOURCE_ID` identifier.
+
+* The repair was performed transactionally and preserved the 139,491 SCImago source mappings and entity-match decisions.
+
+* The full SCImago canonical build was executed a second time after repair.
+
+* The second canonical-build run created 0 new journals and reused all 17,148 existing canonical journals.
+
+* The canonical journal count remained 17,148 after the second run, confirming idempotency.
+
+* `first_observed_year` is populated for all 17,148 canonical journals.
+
+* The deterministic multi-area representative-row rule was spot-checked against a real SCImago `sourceid`.
+
+* For a multi-area journal with multiple rows in its latest year, the alphabetically-first subject area among rows with a non-null publisher was selected.
+
+* Canonical publisher selection was verified against the deterministic representative-row rule.
+
+* 2,144 journals currently have no canonical publisher, but none of those journals had a usable publisher in their latest-year SCImago rows; therefore no publisher backfill was required or performed.
+
+* No duplicate `journal_identifiers` rows were found for the inspected repaired journal.
+
+* The apparent duplicate identifier observed during joined inspection was confirmed to be caused by multiple SCImago records joining to the same canonical journal, not duplicate identifier rows.
+
+* The SCImago canonical build and repair leave source-specific raw publisher values intact in `scimago_records.publisher_raw`.
 
 ## Current Ingestion Status
 
 | Source | Status | Records |
 |---|---|---:|
-| SCImago | Loaded | 139,491 |
+| SCImago | Loaded + canonicalized | 139,491 |
 | ABDC | Pending | — |
 | ABS/AJG | Pending | — |
 | RePEc | Pending | — |
@@ -62,26 +144,42 @@ Day 5 will resolve source-specific journal records to canonical journals and pop
 
 ## Entity Resolution Status
 
-SCImago ingestion currently preserves all source records independently of canonical journal resolution.
+SCImago ingestion records are now linked to canonical journals.
 
-At the end of Day 4:
+At the end of Day 5:
 
-* `scimago_records.journal_id` is NULL for all 139,491 records.
-* Canonical-journal resolution has not yet been applied to SCImago records.
-* Entity resolution is scheduled for Day 5.
+* `scimago_records.journal_id` is populated for all 139,491 SCImago records.
+
+* 17,148 distinct SCImago `sourceid` values map one-to-one to 17,148 canonical journals.
+
+* Each SCImago Sourceid has a corresponding `SCIMAGO_SOURCE_ID` entry in `journal_identifiers`.
+
+* Each SCImago source record has a corresponding accepted entry in `journal_source_mapping`.
+
+* Each SCImago source record has a corresponding accepted entry in `entity_match_decisions`.
+
+* SCImago canonical seeding is idempotent: rerunning the canonical-build pipeline does not create additional canonical journals.
 
 ## Data Sources
+
 JournalHub currently works with the following sources:
 
 * SCImago Journal & Country Rank
+
 * ABDC — Australian Business Deans Council Journal Quality List
+
 * ABS/AJG — Academic Journal Guide
+
 * RePEc
+
 * Financial Times 50 (FT50)
 
 ## Raw Data Policy
+
 The directory:
-`data/raw/`  
+
+`data/raw/`
+
 contains the untouched source files used as the byte-level source of truth.
 
 Normalized ingestion records must never modify the original source representation before it is stored in raw-data lineage fields. Normalization utilities are used only when constructing normalized records.
@@ -89,25 +187,39 @@ Normalized ingestion records must never modify the original source representatio
 The untouched files under `data/raw/` remain the authoritative byte-level source of truth.
 
 ## Database Schema
-The PostgreSQL database schema is implemented through ordered migrations in:  
+
+The PostgreSQL database schema is implemented through ordered migrations in:
+
 `database/migrations/`
 
 Day 2 creates the complete database schema with 18 tables covering:
 
 * source and dataset tracking
+
 * raw file and raw-row lineage
+
 * ingestion rejections
+
 * canonical journals
+
 * journal identifiers and aliases
+
 * source-to-journal mappings
+
 * SCImago records, categories, and areas
+
 * ABDC records
+
 * ABS records
+
 * RePEc records
+
 * FT50 records
+
 * entity-resolution candidates and decisions
 
 ### Raw File SHA-256 Uniqueness
+
 `raw_files.sha256` is globally unique across all sources.
 
 This is intentional: if two different source folders contain byte-identical files, the system treats them as the same raw artifact. This is a deliberate simplicity tradeoff, not an oversight.
@@ -115,3 +227,107 @@ This is intentional: if two different source folders contain byte-identical file
 The database also stores `raw_rows.raw_data` as a structured raw-row snapshot. It is not a byte-level lossless copy of the original file. Parsing through `pandas.read_csv()` can normalize representations before the row is stored.
 
 The untouched files under `data/raw/` remain the true byte-level source of truth.
+
+## Day 5 — SCImago Canonical Journal Seeding
+
+SCImago is used as the initial canonical-journal seeding source because its records provide strong source identifiers and rich journal metadata.
+
+Canonical journals are seeded through the idempotent `get_or_create_canonical_journal` helper.
+
+For SCImago canonical seeding, `SCIMAGO_SOURCE_ID` is treated as the strongest source-specific identifier. When a SCImago Sourceid already has an associated canonical identifier, the existing journal is reused. When the Sourceid is not yet registered, a new canonical journal is created rather than allowing normalized-title matching to collapse it into an existing journal.
+
+This ensures that every distinct SCImago `sourceid` has exactly one canonical journal during SCImago seeding.
+
+### Deterministic Representative Row
+
+A SCImago `sourceid` may have multiple rows for the same year because a journal can be classified into multiple subject areas.
+
+The representative row is selected deterministically:
+
+1. Find the maximum year present for the `sourceid`.
+
+2. Among rows from that year, prefer rows with a non-null, non-empty `publisher_raw`.
+
+3. Among those rows, select the alphabetically-first `subject_area`.
+
+4. If none of the latest-year rows has a publisher, select the alphabetically-first `subject_area` regardless of publisher availability.
+
+This is an arbitrary but deterministic tie-break. The purpose is reproducibility and stable reruns rather than claiming that one subject-area row is inherently more authoritative than another.
+
+### Canonical Publisher Policy
+
+When a canonical journal is created from SCImago, `journals.publisher` is populated from the `publisher_raw` value of the deterministically selected representative SCImago row.
+
+This value represents the best known current publisher at canonical journal creation time. It is not treated as a verified authoritative publisher fact and may later be overwritten when a more authoritative source is incorporated.
+
+The original source-specific publisher value remains in `scimago_records.publisher_raw` and in the corresponding publisher columns of other source tables. Source provenance is therefore preserved even if the canonical publisher is later changed.
+
+If none of the applicable representative candidate rows contains a usable publisher, the canonical publisher may remain NULL.
+
+### `first_observed_year` Policy
+
+`journals.first_observed_year` is the earliest year in which the journal was observed for its SCImago `sourceid` across the currently loaded SCImago data.
+
+It is not the journal's founding year, launch year, or publication-history start date.
+
+As additional historical SCImago data or other year-bearing sources are loaded in the future, this value may become earlier.
+
+### Source-Specific Provenance
+
+Canonicalization does not replace or destroy source-specific metadata.
+
+The original SCImago records remain in `scimago_records`, including:
+
+* `sourceid`
+
+* `title`
+
+* `issn_raw`
+
+* `publisher_raw`
+
+* `subject_area`
+
+* `year`
+
+* other source-specific SCImago fields
+
+Canonical fields in `journals` represent the normalized entity layer, while source tables retain source-specific observations and provenance.
+
+### Day 5 Idempotency
+
+The SCImago canonical-build pipeline is designed to be safely rerunnable.
+
+A second execution against an already-canonicalized SCImago dataset must:
+
+* reuse existing canonical journals through their `SCIMAGO_SOURCE_ID`;
+
+* create no additional canonical journals;
+
+* preserve the existing `journal_id` relationships;
+
+* preserve source mappings and entity-match decisions;
+
+* leave the canonical journal count unchanged.
+
+The Day 5 pipeline was executed twice successfully. The second execution created 0 new journals and reused all 17,148 existing canonical journals.
+
+## Project Conventions
+
+* Raw source files are never modified by ingestion.
+
+* Source-specific tables preserve source-level observations and provenance.
+
+* Canonical tables represent normalized cross-source entities.
+
+* Strong source identifiers take precedence over weaker entity-resolution signals when explicitly supplied.
+
+* Normalized title matching must not override a supplied authoritative source identifier during source-specific canonical seeding.
+
+* Database writes that belong to one logical ingestion or canonicalization operation should be transactional.
+
+* Idempotency is required for repeatable ingestion and canonicalization operations.
+
+* Deterministic ordering and tie-breaking must be used whenever multiple equivalent source records could otherwise produce non-reproducible canonical values.
+
+* Changes discovered during implementation that materially affect entity identity, provenance, idempotency, or downstream correctness should be incorporated into the project plan and documented in the repository.
