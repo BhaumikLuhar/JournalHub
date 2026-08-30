@@ -1,0 +1,2 @@
+ALTER TABLE abdc_records
+ALTER COLUMN publisher TYPE VARCHAR(500);

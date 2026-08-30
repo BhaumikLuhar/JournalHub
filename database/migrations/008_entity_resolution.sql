@@ -7,7 +7,7 @@ CREATE TABLE entity_match_candidates (
     similarity NUMERIC(5,4),
     issn_match BOOLEAN,
     publisher_match BOOLEAN,
-    match_method VARCHAR(30) NOT NULL,   -- may become a combined value like 'exact_title_ambiguous+fuzzy_title'
+    match_method VARCHAR(100) NOT NULL,   -- may become a combined value like 'exact_title_ambiguous+fuzzy_title'
     rank_among_candidates SMALLINT NOT NULL DEFAULT 1,  -- 1 = best candidate, 2 = second-best, etc.
     review_status VARCHAR(20) NOT NULL DEFAULT 'pending'
         CHECK (review_status IN ('pending','accepted','rejected')),
