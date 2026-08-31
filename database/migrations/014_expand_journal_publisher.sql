@@ -1,0 +1,2 @@
+ALTER TABLE journals
+ALTER COLUMN publisher TYPE VARCHAR(500);
