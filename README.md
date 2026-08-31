@@ -4,9 +4,9 @@ JournalHub is a unified journal intelligence platform that consolidates journal 
 
 ## Project Status
 
-**Current phase:** Day 7 complete — ABS/AJG wide-to-long ingestion + entity resolution and RePEc title-only ingestion + entity resolution.
+**Current phase:** Day 8 implementation complete — FT50 ingestion + entity resolution completed, database-backed manual-review queue and stale-CSV protection implemented and tested. Manual review of the remaining candidate queue is intentionally deferred.
 
-Days 1–7 are complete.
+Days 1–8 implementation work is complete. The Day 8 manual-review decisions themselves remain intentionally deferred and must be completed before the final Day 8 resolution-state closure checks and final Day 8 completion commit.
 
 * **Day 1:** Environment setup and full raw-data inventory completed.
 * **Day 2:** Complete PostgreSQL database schema implemented through ordered migrations, covering 18 tables, controlled vocabularies, uniqueness constraints, and foreign-key relationships.
@@ -15,6 +15,7 @@ Days 1–7 are complete.
 * **Day 5:** SCImago canonical-journal seeding completed. Every distinct SCImago `sourceid` now resolves to exactly one canonical journal, with source identifiers, source mappings, entity-match decisions, SCImago record links, deterministic representative title/publisher selection, and idempotent reruns verified.
 * **Day 6:** ABDC ingestion and entity resolution completed. All six historical ABDC sheets were parsed, transformed, validated, ingested transactionally, and resolved against the canonical journal layer using the ISSN → exact-title → fuzzy-title hierarchy. Rating normalization, FoR scheme mapping, candidate evidence merging, sibling-closing on auto-accept, new-journal ISSN registration, conflict reporting, retry behavior, and resolver fixed-point idempotency were verified.
 * **Day 7:** ABS/AJG and RePEc ingestion and entity resolution completed. ABS was transformed from wide format into year-level normalized records using dynamic `AJG\d{4}` detection, while preserving one raw source row per original wide row and reusing its source-row hash across emitted rating-year records. RePEc was ingested without identifiers and resolved using title-only matching with confidence-scored publisher-suffix splitting, safe raw-title fallback for low/none split confidence, exact-title handling, fuzzy candidate generation, evidence merging, automatic acceptance, pending review, and new-journal creation. Real source-data inspection also required two publisher-column width migrations.
+* **Day 8:** FT50 ingestion and title-only entity resolution completed. All 50 FT50 records loaded successfully and resolved: 49 were accepted against existing canonical journals and 1 resulted in a new canonical journal. The database-backed manual-review export was implemented using `review_status='pending'` as the sole source of truth. A 578-row review queue covering 411 source records across ABDC, ABS, and RePEc was exported with a batch timestamp and explicit decision column. Stale-CSV protection was implemented and tested successfully. Manual review of the 578 pending candidates was intentionally deferred for later completion.
 
 ### Day 3 Verification
 
@@ -85,13 +86,13 @@ The following were verified successfully:
 
 ## Current Ingestion Status
 
-| Source | Status | Records |
-|---|---|---:|
-| SCImago | Loaded + canonicalized | 139,491 |
-| ABDC | Loaded + entity resolution | 16,214 |
-| ABS/AJG | Loaded + entity resolution | 4,749 |
-| RePEc | Loaded + entity resolution | 3,459 |
-| FT50 | Pending | — |
+| Source  | Status                     | Records |
+| ------- | -------------------------- | ------: |
+| SCImago | Loaded + canonicalized     | 139,491 |
+| ABDC    | Loaded + entity resolution |  16,214 |
+| ABS/AJG | Loaded + entity resolution |   4,749 |
+| RePEc   | Loaded + entity resolution |   3,459 |
+| FT50    | Loaded + entity resolution |      50 |
 
 ## Entity Resolution Status
 
@@ -133,12 +134,14 @@ At the end of Day 7:
 * 4,743 ABS records have a non-NULL `journal_id`.
 * 6 ABS records remain unresolved and are retained for review.
 * 4,743 ABS entity-match decisions exist for dataset 55:
+
   * 4,192 `exact_issn`
   * 486 `exact_title`
   * 65 `new_journal`
 * 1,635 original ABS source rows are retained in `raw_rows`.
 * Each original ABS wide source row can emit multiple normalized rating-year records while retaining the same `source_row_hash`.
 * ABS rating-year totals are:
+
   * 2018 = 1,479
   * 2021 = 1,635
   * 2024 = 1,635
@@ -155,12 +158,14 @@ At the end of Day 7:
 * 3,284 RePEc records have a non-NULL `journal_id`.
 * 175 RePEc records remain unresolved and are intentionally retained for review.
 * 3,284 RePEc entity-match decisions exist:
+
   * 1,173 `exact_title`
   * 2 `exact_title_ambiguous+fuzzy_title`
   * 24 `fuzzy_title`
   * 2,085 `new_journal`
 * 211 pending RePEc candidate rows remain for Day 8 manual review.
 * RePEc publisher-suffix split confidence is:
+
   * 3,014 `high`
   * 445 `low`
 * No RePEc records have a non-NULL `source_snapshot_date`, because the source file provides no source date.
@@ -170,6 +175,267 @@ At the end of Day 7:
 * The RePEc dataset is `status='loaded'` with `record_count=3,459`.
 * The resolver was rerun after correcting a publisher-width constraint and completed all 176 initially unresolved records without runtime failures.
 * The remaining 175 unresolved records are intentional review cases rather than ingestion/resolution crashes.
+
+### FT50 Entity Resolution Status
+
+FT50 was completed during Day 8.
+
+The real source file is:
+
+`data/raw/ft50/ft50.csv`
+
+The source contains exactly 50 rows and the verified columns:
+
+* `rank`
+* `journal_name`
+* `ft50_year`
+
+Every transformed FT50 record contains:
+
+* normalized `journal_name`
+* parsed integer `rank`
+* parsed integer `ft50_year`
+* `included = True`
+* `source_row_hash`
+
+### FT50 Ingestion
+
+The FT50 dataset was loaded as dataset `57`.
+
+Verified operational results:
+
+* dataset id = 57
+* source = FT50
+* dataset year = 2026
+* file = `ft50.csv`
+* dataset status = `loaded`
+* dataset record count = 50
+* `ft50_records` count = 50
+* `raw_rows` count for FT50 = 50
+* ingestion rejections = 0
+* duplicate imported rows = 0
+
+### FT50 Entity-Resolution Strategy
+
+FT50 provides no ISSN or publisher field, so resolution is title-only.
+
+The resolver uses the existing canonical title-matching infrastructure:
+
+1. Existing accepted/manual decisions are respected.
+2. Exact normalized-title matching is attempted.
+3. Ambiguous exact-title candidates are retained as candidate evidence.
+4. Fuzzy normalized-title matching generates up to five candidates.
+5. High-confidence fuzzy matches are automatically accepted.
+6. Medium-confidence candidates would remain pending for manual review.
+7. If no sufficiently strong candidate exists, a canonical journal can be created through the existing conflict-tolerant canonical helper.
+
+Because the real FT50 dataset resolved without generating any pending candidate rows, no FT50 manual-review candidates were created.
+
+### FT50 Operational Results
+
+The final FT50 dataset contains:
+
+* 50 FT50 records.
+* 50 records with a non-NULL `journal_id`.
+* 49 `accepted` entity-match decisions.
+* 1 `new_journal` entity-match decision.
+* 50 FT50 source records with exactly one corresponding entity-match decision.
+* 50 FT50 records with corresponding canonical journal assignments.
+* 0 FT50 pending candidate rows.
+
+The final FT50 checks confirmed:
+
+* `ft50_records = 50`
+* `resolved_records = 50`
+* `accepted = 49`
+* `new_journal = 1`
+* both decision types have non-NULL `journal_id`
+* no FT50 source record has more than one decision row.
+
+### Day 8 — Database-Backed Manual Review Queue
+
+Day 8 also established the database-backed review workflow for unresolved candidate matches across ABDC, ABS, and RePEc.
+
+The database column:
+
+`entity_match_candidates.review_status`
+
+is the sole source of truth for whether a candidate is currently reviewable.
+
+The review CSV is only an exported snapshot and is never authoritative database state.
+
+Before export, the pending queue was:
+
+* ABDC = 340 pending candidate rows across 230 source records.
+* ABS = 27 pending candidate rows across 6 source records.
+* RePEc = 211 pending candidate rows across 175 source records.
+* FT50 = 0 pending candidate rows.
+* Total = 578 pending candidate rows across 411 source records.
+
+### Review Export
+
+`entity_resolution/review_export.py` was implemented to export only:
+
+`WHERE c.review_status = 'pending'`
+
+from the database.
+
+The export is written to:
+
+`reports/ambiguous_matches.csv`
+
+The export contains:
+
+* `exported_at`
+* `candidate_id`
+* `source`
+* `source_record_id`
+* `source_record_display_name`
+* `candidate_journal_id`
+* `candidate_journal_title`
+* `similarity`
+* `issn_match`
+* `publisher_match`
+* `rank_among_candidates`
+* `decision`
+
+The export was verified to contain:
+
+* 578 candidate rows.
+* 411 unique source-record groups.
+* 340 ABDC candidates.
+* 27 ABS candidates.
+* 211 RePEc candidates.
+* 0 FT50 candidates.
+* exactly one common `exported_at` timestamp for the entire export batch.
+* an initially blank `decision` value for all 578 rows.
+
+The `decision` field is intended for the later human-review stage and accepts:
+
+* `accepted`
+* `new_journal`
+* `rejected_no_match`
+
+For `accepted`, the specific `candidate_id` is the selected candidate.
+
+For `new_journal` and `rejected_no_match`, the decision applies to the complete candidate group belonging to the source record.
+
+### Stale-CSV Protection
+
+`entity_resolution/apply_review_decisions.py` was implemented to protect the database against stale review CSVs.
+
+Before applying a decision, the application locks the candidate row and checks its current database state.
+
+Conceptually:
+
+```text
+CSV decision
+    ↓
+SELECT candidate ... FOR UPDATE
+    ↓
+current review_status
+    ↓
+pending?
+ ┌──────┴──────┐
+ yes           no
+  ↓             ↓
+apply       stale/skipped
+               ↓
+reports/stale_review_rows.csv
+```
+
+If the database candidate is no longer `pending`, the CSV decision is not applied.
+
+The stale row is recorded in:
+
+`reports/stale_review_rows.csv`
+
+with:
+
+* `candidate_id`
+* `csv_decision`
+* `current_db_status`
+
+A controlled stale-CSV test was executed using candidate `20`.
+
+The test deliberately changed candidate `20` from `pending` to `rejected` before applying a temporary CSV decision of `accepted`.
+
+The application correctly produced:
+
+* `Applied: 0`
+* `Stale/skipped: 1`
+* `candidate_id=20`
+* `csv_decision=accepted`
+* `current_db_status=rejected`
+
+No entity-match decision was inserted for the stale candidate.
+
+Candidate `20` was then restored to its original `pending` state.
+
+The overall pending queue returned to exactly 578 candidates.
+
+Temporary stale-test files were removed after verification.
+
+### Current Manual-Review State
+
+The manual review of the 578 pending candidate rows was intentionally deferred.
+
+This is a deliberate project-state decision, not an ingestion or resolver failure.
+
+Current review state:
+
+* 578 `entity_match_candidates` remain `pending`.
+* 411 source records are represented in the pending candidate queue.
+* ABDC contributes 340 pending candidates.
+* ABS contributes 27 pending candidates.
+* RePEc contributes 211 pending candidates.
+* FT50 contributes 0 pending candidates.
+* `reports/ambiguous_matches.csv` exists as the latest review snapshot.
+* No real manual decisions have been entered into the review CSV.
+* `apply_review_decisions.py` has been implemented and stale-state protection has been tested.
+* The real review CSV must not be applied until human decisions have been entered.
+* Pending candidates must remain pending rather than being automatically forced into a decision.
+
+The review queue is intentionally preserved in the database so that manual review can be completed later without rebuilding the entity-resolution pipeline.
+
+### Deferred Day 8 Work
+
+The following Day 8 tasks remain intentionally deferred:
+
+1. Manually review all 411 pending source-record groups / 578 candidate rows.
+2. Enter one of:
+
+   * `accepted`
+   * `new_journal`
+   * `rejected_no_match`
+3. For `accepted`, identify the specific candidate ID.
+4. Before choosing `new_journal`, perform a manual canonical-journal search to avoid accidental duplicate creation.
+5. Run `apply_review_decisions.py` against the reviewed CSV.
+6. Inspect `reports/stale_review_rows.csv`.
+7. Verify the pending candidate count reaches 0.
+8. Run the whole-project "neither `journal_id` nor decision" integrity check.
+9. Run the sibling-closing invariant across the entire candidate table.
+10. Confirm legitimate `rejected_no_match` outcomes are closed decisions rather than unresolved pending records.
+11. Complete the final Day 8 verification.
+12. Only then record Day 8 as fully review-resolved and make the final Day 8 completion commit.
+
+Until these steps are completed, the project must treat the 578 pending candidates as intentional unresolved review work.
+
+### Important Future Review Rule
+
+When manual review eventually resumes, do not assume that the previously exported CSV is still current.
+
+The database remains authoritative.
+
+If a candidate's `review_status` has changed since export, `apply_review_decisions.py` must classify that CSV row as stale and skip it.
+
+If the queue needs to be refreshed before review, rerun:
+
+`python -m entity_resolution.review_export`
+
+This exports only candidates that are currently `pending`.
+
+Already-decided candidates therefore do not reappear in a fresh review export.
 
 ## Data Sources
 
@@ -666,7 +932,7 @@ The decision distribution is:
 
 There are 211 pending RePEc candidate rows.
 
-The 211 pending candidate rows are the explicit Day 8 RePEc review workload.
+The 211 pending candidate rows were included in the Day 8 database-backed review queue.
 
 The final raw-lineage checks show:
 
@@ -708,9 +974,204 @@ The following were verified:
 * RePEc entity resolution completed without runtime failures after the schema correction.
 * 3,284 RePEc records have final journal assignments.
 * 175 RePEc records remain intentionally unresolved.
-* 211 pending RePEc candidate rows were recorded as the Day 8 review workload.
+* 211 pending RePEc candidate rows were recorded and later included in the Day 8 review queue.
 * RePEc raw lineage has 0 missing references.
 * Dataset 56 is loaded with `record_count=3,459`.
+
+## Day 8 — FT50 Ingestion + Database-Backed Review Infrastructure
+
+Day 8 completed the final source ingestion and established the infrastructure required for safe manual entity-resolution review.
+
+### FT50 Parser and Transformer
+
+The FT50 parser reads:
+
+`data/raw/ft50/ft50.csv`
+
+The verified columns are:
+
+* `rank`
+* `journal_name`
+* `ft50_year`
+
+Transformation rules are:
+
+* `journal_name = normalize_title(...)`
+* `rank = parse_int_safe(...)`
+* `ft50_year = parse_int_safe(...)`
+* `included = True`
+* `source_row_hash = compute_row_hash(...)`
+
+The real file contains exactly 50 rows.
+
+All 50 rows transformed successfully.
+
+No rank or year values became NULL during parsing, and no journal names were empty.
+
+### FT50 Ingestion Pipeline
+
+`pipelines/ingest_ft50.py` was implemented using the project's existing transactional ingestion pattern.
+
+The real FT50 file produced:
+
+* SHA-256 = `68690dca6c9320f88871624dc92f0f49f5972ec4b259662d8187114b428ac63d`
+* dataset id = 57
+* dataset year = 2026
+* raw rows = 50
+* imported records = 50
+* rejected = 0
+* duplicates = 0
+* dataset status = `loaded`
+
+### FT50 Resolution Pipeline
+
+`pipelines/resolve_ft50.py` was implemented as a title-only resolver because FT50 provides no ISSN.
+
+The resolver processed all 50 unresolved FT50 records successfully:
+
+* processed = 50
+* succeeded = 50
+* failed = 0
+* unresolved FT50 records after resolution = 0
+
+The final decision distribution is:
+
+* `accepted` = 49
+* `new_journal` = 1
+
+No FT50 candidate rows remain pending.
+
+Every FT50 source record has exactly one entity-match decision and a non-NULL canonical `journal_id`.
+
+### Database-Backed Review Export
+
+`entity_resolution/review_export.py` was implemented to query the database directly and export only:
+
+`entity_match_candidates.review_status = 'pending'`
+
+to:
+
+`reports/ambiguous_matches.csv`
+
+The export contains 578 rows across 411 source-record groups.
+
+The export is grouped and ordered by source/source-record/candidate rank so that all candidates for one source record appear together.
+
+The export includes a single common `exported_at` timestamp for the complete batch.
+
+The CSV also contains a blank `decision` column for later human review.
+
+The database remains authoritative; the CSV is only a review snapshot.
+
+### Review Decision Vocabulary
+
+The eventual human review uses exactly three decision values:
+
+* `accepted`
+* `new_journal`
+* `rejected_no_match`
+
+`accepted` requires selecting a specific `candidate_id`.
+
+`new_journal` means none of the displayed candidates is correct and the source record should be represented by a new canonical journal after checking the canonical table for an existing differently named journal.
+
+`rejected_no_match` means none of the displayed candidates is correct and the reviewer is confident the source record does not currently belong anywhere in the canonical journal table.
+
+A low fuzzy similarity score by itself is not sufficient justification for `new_journal`.
+
+### Review Decision Application
+
+`entity_resolution/apply_review_decisions.py` was implemented as the database mutation layer.
+
+The application:
+
+* validates the review CSV structure;
+* validates decision vocabulary;
+* validates candidate/source-record identity fields;
+* detects conflicting decisions within a source-record group;
+* locks candidates during application;
+* checks the current database `review_status`;
+* skips stale candidates;
+* records stale candidates in `reports/stale_review_rows.csv`;
+* applies accepted decisions transactionally;
+* closes pending siblings when a candidate is accepted;
+* updates the source record's `journal_id`;
+* inserts the corresponding `journal_source_mapping`;
+* inserts an `entity_match_decisions` record;
+* handles `rejected_no_match` by closing all candidate siblings and inserting a decision with `journal_id = NULL`;
+* handles `new_journal` through the existing conflict-tolerant canonical-journal helper;
+* preserves the database as the sole authoritative resolution state.
+
+### Stale-CSV Protection Verification
+
+A controlled test verified that a CSV decision cannot overwrite newer database state.
+
+Candidate `20` was temporarily changed from `pending` to `rejected`.
+
+A temporary CSV contained:
+
+* candidate_id = 20
+* decision = `accepted`
+
+The application detected:
+
+`db_status = rejected`
+
+and produced:
+
+* Applied = 0
+* Stale/skipped = 1
+
+The stale report correctly contained:
+
+`20,accepted,rejected`
+
+No decision row was created for the stale candidate.
+
+Candidate `20` was then restored to:
+
+`review_status = 'pending'`
+
+The total pending queue returned to 578.
+
+The temporary test files were removed.
+
+### Day 8 Current State
+
+Day 8 implementation work is complete, but the manual review itself is intentionally deferred.
+
+Current database state:
+
+* FT50 = 50/50 resolved.
+* FT50 candidates = 0 pending.
+* ABDC pending candidates = 340.
+* ABS pending candidates = 27.
+* RePEc pending candidates = 211.
+* Total pending candidates = 578.
+* Total pending source records = 411.
+
+The 578 candidates must remain pending until they are manually reviewed.
+
+### Day 8 Deferred Completion
+
+When manual review resumes, the next steps are:
+
+1. Review every source-record group in `reports/ambiguous_matches.csv`.
+2. Enter a valid decision.
+3. Before selecting `new_journal`, search the canonical journal table for a possible existing match.
+4. Run:
+   `python -m entity_resolution.apply_review_decisions reports/ambiguous_matches.csv`
+5. Inspect `reports/stale_review_rows.csv`.
+6. Confirm the pending candidate count reaches 0.
+7. Run the whole-project unresolved-without-decision query.
+8. Confirm it returns 0 for ABDC, ABS, RePEc, and FT50.
+9. Run the sibling-closing invariant query.
+10. Confirm it returns zero rows.
+11. Confirm legitimate `rejected_no_match` decisions are closed outcomes.
+12. Update this README to mark the manual review as completed.
+13. Make the final Day 8 completion commit.
+
+Until the manual review is completed, the final Day 8 commit message from the original implementation plan should not be treated as a truthful project-state marker.
 
 ## Project Conventions
 
@@ -725,9 +1186,14 @@ The following were verified:
 * Source-specific wide-to-long transformations must retain raw-row lineage to the original source row.
 * Source-provided dates must not be invented when the source does not supply them.
 * Publisher-suffix parsing must be confidence-aware and must safely decline ambiguous splits.
+* Database-backed review state is authoritative; exported review CSVs are snapshots only.
+* A stale review CSV must never overwrite newer database state.
+* Manual entity-resolution decisions must distinguish `accepted`, `new_journal`, and `rejected_no_match`.
+* `new_journal` must not be selected merely because candidate similarity is low; the canonical table should first be checked for an existing differently named entity.
+* `rejected_no_match` is a legitimate closed resolution outcome and must not be treated as an unresolved error.
 * Changes discovered during implementation that materially affect entity identity, provenance, idempotency, schema compatibility, or downstream correctness should be incorporated into the project plan and documented in the repository.
 
-Day 6 completion is based on the ABDC parser/transformer/resolver manual tests, database integrity checks, ingestion verification, and repeated ingest/resolve fixed-point checks performed during implementation. Day 7 completion is based on the ABS and RePEc parser/transformer checks, real source-value inspection, transactional ingestion results, entity-resolution checks, lineage validation, and the final database spot-checks described above.
+Day 6 completion is based on the ABDC parser/transformer/resolver manual tests, database integrity checks, ingestion verification, and repeated ingest/resolve fixed-point checks performed during implementation. Day 7 completion is based on the ABS and RePEc parser/transformer checks, real source-value inspection, transactional ingestion results, entity-resolution checks, lineage validation, and the final database spot-checks described above. Day 8 implementation completion is based on FT50 parser/transformer validation, successful FT50 ingestion and resolution, database-backed pending-candidate export validation, review decision application implementation, and controlled stale-CSV protection testing. The Day 8 manual-review and final whole-project resolution-state checks remain intentionally deferred.
 
 A repository-wide pytest result should only be recorded here after that suite is explicitly run and passed.
 
