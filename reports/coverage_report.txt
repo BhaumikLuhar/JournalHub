@@ -1,0 +1,15 @@
+JournalHub Coverage Report
+========================================================================
+
+Total canonical journals: 20353
+
+SCImago: 139491 source records, 139491 linked
+
+ABDC: matched 14948 | new_journal 1054 | rejected_no_match 0 | still pending 212
+ABS: matched 4678 | new_journal 65 | rejected_no_match 0 | still pending 6
+REPEC: matched 1199 | new_journal 2085 | rejected_no_match 0 | still pending 175
+FT50: matched 49 | new_journal 1 | rejected_no_match 0 | still pending 0
+
+Pending review status:
+Total downstream records still pending: 393
+INFO: Pending records remain because the Day 8 manual-review queue is intentionally deferred.
